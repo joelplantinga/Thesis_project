@@ -337,12 +337,6 @@ class Dataset:
         return(prompts)
 
 
-
-print("----------------------------------------------------")
-
-
-
-
 environment = Dataset()
 
 data = environment.generate_prompts(period=365, date_dep=False)
