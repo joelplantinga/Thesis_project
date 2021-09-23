@@ -39,7 +39,7 @@ class Dataset:
         # Tuple objects that are used throughout the class.
         self.Prompt = namedtuple("Prompt", 'prompt_type prompt_description prompt_weight')
         self.Room = namedtuple('Room', 'room_x room_y room_floor')
-        self.User = namedtuple("User", 'id user_x user_y user_floor user_weight team feedback')
+        self.User = namedtuple("User", 'user_id user_x user_y user_floor user_weight team feedback')
         self.Row = namedtuple('Row', self.User._fields + self.Room._fields + self.Prompt._fields + 
                               ('tasks_performed_day', 'team_prompts',  'goalsetting', 'date_time', 'total_weight', ))
 
@@ -265,13 +265,13 @@ class Dataset:
             for x in random_order:
                 
                 user = self.users[x]
-                row = self.Row(*user, *room, *prompt, self.tasks_performed_day[user.id],
+                row = self.Row(*user, *room, *prompt, self.tasks_performed_day[user.user_id],
                                self.team_prompts[user.team], self.team_goals[user.team], 
                                user_time, 0)
 
                 weight = self.__calculate_weight(row, date_dep)
                 row = row._replace(total_weight=weight)
-                self.tasks_performed_day[row.id] += 1
+                self.tasks_performed_day[row.user_id] += 1
 
                 prompts.append(row)
 
@@ -336,9 +336,39 @@ class Dataset:
         
         return(prompts)
 
+    def finish_dataset(self, df):
+
+        """
+        Function that strips the dataset with the variables that were
+        initially added for calculation purposes. It also includes the
+        classification. The dataset is now ready for use in ML algorithms.
+        
+        Attributes:
+        ------------
+
+        df : pd.Dataframe
+            Dataframe containing prompts including helper columns.
+        
+        Returns:
+        ------------
+
+        df : pd.Dataframe
+            Stripped dataframe including classification.
+        """
+
+        df["classification"] = [
+            1 if (weight >0.5) else 0 for weight in df["total_weight"]
+        ]
+
+        df = df.drop(['user_weight', 'prompt_weight', 'total_weight'], axis=1)
+
+        return df
 
 environment = Dataset()
 
-data = environment.generate_prompts(period=365, date_dep=False)
-data.to_csv("output.csv")
+data = environment.generate_prompts(period=365)
 print(len(data.index))
+
+data = environment.finish_dataset(data)
+
+data.to_csv("output.csv", index=False)
