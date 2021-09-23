@@ -33,7 +33,7 @@ class Dataset:
 
         x_users : int
             The number of users that are generated in the environment
-            (default is 4)
+            (default is 100)
         """
 
         # Tuple objects that are used throughout the class.
@@ -62,8 +62,8 @@ class Dataset:
         self.prompts = self.__create_prompts()
 
         # General information
+        self.x_users = x_users
         self.rooms = self.__create_rooms()
-
         self.tasks_performed_day = 100  * [0]
 
         # Intervention information
@@ -256,7 +256,7 @@ class Dataset:
         
         while (time.hour < 19):
 
-            random_order = random.sample(range(0, 100), 100)
+            random_order = random.sample(range(0, self.x_users), self.x_users)
             room = random.choice(self.rooms)
             prompt = random.choice(self.prompts)
 
@@ -334,6 +334,8 @@ class Dataset:
 
             prompts = prompts.append(self.__generate_prompts_day(date, min_per_new_prompt, date_dep, prompt_goal))
         
+        prompts.to_csv("full.csv", index=False)
+        
         return(prompts)
 
     def finish_dataset(self, df):
@@ -362,13 +364,12 @@ class Dataset:
 
         df = df.drop(['user_weight', 'prompt_weight', 'total_weight'], axis=1)
 
-        return df
+        df.to_csv("stripped.csv", index=False)
 
-environment = Dataset()
+        return(df)
 
-data = environment.generate_prompts(period=365)
-print(len(data.index))
 
+environment = Dataset(x_users=10)
+data = environment.generate_prompts(period=365, min_per_new_prompt=30)
 data = environment.finish_dataset(data)
 
-data.to_csv("output.csv", index=False)
