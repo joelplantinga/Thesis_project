@@ -369,7 +369,7 @@ class Dataset:
         return(df)
 
 
-environment = Dataset(x_users=10)
-data = environment.generate_prompts(period=365, min_per_new_prompt=30)
+environment = Dataset(x_users=100)
+data = environment.generate_prompts(period=2, min_per_new_prompt=10)
 data = environment.finish_dataset(data)
 
