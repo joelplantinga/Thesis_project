@@ -17,7 +17,7 @@ class Online:
 
         return x
 
-    def __calc_floor_div(self, x):
+    def __calc_floor_dif(self, x):
         
         x['floor_div'] = abs(x['user_floor'] - x['room_floor'])
 
@@ -31,7 +31,7 @@ class Online:
         date = pd.to_datetime(x["date_time"], format='%Y-%m-%d %H:%M:%S')
 
         x["diff_in_time"] = (date - datetime.strptime("1970-01-01", "%Y-%m-%d")).days
-
+        x["month"] = date.month
         del x["date_time"]
         return x
 
@@ -97,7 +97,7 @@ class Online:
         del X['device']
 
 
-        OHE_features = ["prompt_description"]
+        OHE_features = ["prompt_description", "month"]
 
         # OneHotEncoding pipe. First the right features are chosen
         # before they are passed to the encoder.
@@ -114,7 +114,7 @@ class Online:
             
             # Make sure that the features are understood well by the model.
             xi = self.__calc_dist(xi)     
-            xi = self.__calc_floor_div(xi)
+            xi = self.__calc_floor_dif(xi)
             xi = self.__date_mod(xi)
 
             # adds the features to the encoder. In order to memorise
@@ -140,7 +140,7 @@ class Online:
 
             # For testing purposes
             if (i % 5000 == 0):
-                print("#", i, round(float(metric.get() * 100), 2))  
+                print("#", i, round(float(metric.get() * 100), 2))
             i += 1
         
         return float(metric.get())

@@ -46,23 +46,10 @@ class Dataset:
         self.State = namedlist("State", "window airco heating lightning device") # must be mutable
 
         self.Row = namedtuple('Row', self.User._fields + self.Room._fields + self.Prompt._fields + 
-                              ('tasks_performed_day', 'team_prompts',  'goalsetting', 'date_time', 'total_weight', ))
+                              ('tasks_performed_day', 'team_prompts',  'goalsetting', 'date_time', 'total_weight', 'classification',))
 
         # User information
         self.users = self.__create_users(x_users)
-
-        # Task information
-        self.prompt_description_task = [
-            ("close_window", 0.20), ("open_window", 0.20),
-            ("enable_airco", 0.25), ("disable_airco", 0.25),
-            ("turn_off_device", 0.15), ("enable_heating", 0.20),
-            ("disable_heating", 0.20), ("enable_lightning", 0.15),
-            ("disable_lightning", 0.15),
-            ]
-        self.prompt_description_question = [
-            ("check_window", 0.10), ("check_weather", 0.05), ("check_lightning", 0.05),
-            ("check_airco", 0.10), ("check_heating", 0.10),
-            ]
 
         self.devices = [
             self.Device("window", 0.20, 1), self.Device("airco", 0.25, 1),
@@ -98,7 +85,6 @@ class Dataset:
 
     def __select_prompt(self, room_nr):
         
-
         # 10% change of getting a weather question.
         if(random.randint(1,10) == 1):
             return self.Prompt("question", "check weather" , 0.05, "no_device", 0)
@@ -118,33 +104,6 @@ class Dataset:
                     return self.Prompt("question", "check " + dev.device, dev.weight-0.1, dev.device, 1)
         else:
             return self.Prompt("question", "check " + dev.device, dev.weight-0.1, dev.device, 1)
-
-    def __create_prompts(self):
-
-        """
-        Function that creates all prompt objects.
-        
-        Returns:
-        ------------
-
-        tasks : list[Prompt]
-            List containing all different prompts
-        """
-
-        tasks = []
-
-        for task in self.prompt_description_task:
-            description, weight = task
-            tasks.append(self.Prompt("task", description, weight))
-        
-        for question in self.prompt_description_question:
-            description, weight = question
-            tasks.append(self.Prompt("question", description, weight))
-
-        # prompt = random.choice(self.devices)
-
-
-        return tasks
 
     def __create_rooms(self):
 
@@ -266,7 +225,9 @@ class Dataset:
             # People tend to lose motivation nearing the goal
             weight *= 1 + (0.1 * (1 - row.goalsetting))
 
-        return weight
+        
+
+        return min(0.99, weight)
 
     def __update_state(self, room_nr, dev):
         
@@ -345,15 +306,21 @@ class Dataset:
 
                 row = self.Row(*user, *room, *prompt, self.tasks_performed_day[user.user_id],
                                self.team_prompts[user.team], self.team_goals[user.team], 
-                               user_time, 0)
+                               user_time, 0, 0)
 
                 weight = self.__calculate_weight(row, date_dep)
                 row = row._replace(total_weight=weight)
-                self.tasks_performed_day[row.user_id] += 1
+                
+                classification = random.uniform(0, 1) <= weight
+                row = row._replace(classification=classification)
+
 
                 prompts.append(row)
 
-                if (weight > 0.5):
+                if (classification == True):
+
+                    self.tasks_performed_day[row.user_id] += 1
+
                     if(prompt.prompt_type == "task"):
                         self.__update_state(room_nr, prompt.device)
                         # TODO: update statefunction, get roomnumber, get device
@@ -426,8 +393,8 @@ class Dataset:
 
         """
         Function that strips the dataset with the variables that were
-        initially added for calculation purposes. It also includes the
-        classification. The dataset is now ready for use in ML algorithms.
+        initially added for calculation purposes. The dataset is now ready 
+        for use in ML algorithms.
         
         Attributes:
         ------------
@@ -442,10 +409,6 @@ class Dataset:
             Stripped dataframe including classification.
         """
 
-        df["classification"] = [
-            1 if (weight >0.5) else 0 for weight in df["total_weight"]
-        ]
-
         df = df.drop(['user_weight', 'prompt_weight', 'total_weight'], axis=1)
 
         df.to_csv("stripped.csv", index=False)
@@ -453,9 +416,3 @@ class Dataset:
         return(df)
 
 
-environment = Dataset(x_users=100)
-data = environment.generate_prompts(period=365, min_per_new_prompt=10)
-
-# print(environment.get_user_room(50.6, 37.32))
-# print(data.head())
-data = environment.finish_dataset(data)
