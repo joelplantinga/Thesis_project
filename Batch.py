@@ -251,8 +251,6 @@ class Batch:
         else:
             X = X.drop(cat_variables, axis=1)
 
-        X.to_csv("test.csv", index=False)
-
         return X, y
 
     def enhanced(self, data, encoder='combination'):
