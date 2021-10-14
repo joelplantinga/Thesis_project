@@ -187,17 +187,20 @@ class Batch:
             hashed_features = hashed_features.add_prefix(feature + "_")
 
             df = pd.concat([df.reset_index(drop=True), hashed_features], axis=1)
+        
+        df.to_csv("test.csv")
 
         return df
+
         
 
-    def prepare_data(self, data, encoder):
+    def prepare_data(self, data, encoding):
 
         """Function that prepares the data before it gets passed to 
         the Random Forest model. It calculates the distance and floor
         difference between user and prompt. Modifies the date feature and
         encodes the categorical data in the encoder given by the user using 
-        encoder='ENCODER'.
+        encoding='ENCODER'.
 
         Attributes:
         ------------
@@ -205,7 +208,7 @@ class Batch:
         df : pd.Dataframe
             Dataset that containing both the features and classification.
 
-        encoder : str
+        encoding : str
             Encoding technique for the categorical variables. Either 'label' for 
             label encoding, 'ohe' for One Hot Encoding, 'hashing' for hashing, 'combi' 
             for a combination of both hashing and OHE and none for removing the categorical
@@ -222,13 +225,9 @@ class Batch:
 
         """
 
-        # not_imp = ['has_location']
-        # data = data.drop(not_imp, axis=1)
-
         y = data.pop('classification')
 
         X = data
-
         X = self.__calc_dist(X)
         X = self.__calc_floor_dif(X)
         X = self.__date_mod(X)
@@ -237,14 +236,14 @@ class Batch:
         hash_features = [('user_id', 8), ("prompt_description", 3), 
                          ("prompt_type", 1), ("device", 3)]
 
-        if (encoder == 'label'):
+        if (encoding == 'label'):
             X = self.__label_encoder(X, cat_variables)
-        elif (encoder == 'ohe'):
+        elif (encoding == 'ohe'):
             X = pd.get_dummies(X, columns = cat_variables)
-        elif (encoder == 'hashing'):
+        elif (encoding == 'hashing'):
             X = self.__feature_hasher(X, hash_features)
             X = X.drop(cat_variables, axis=1)
-        elif (encoder == 'combi'):
+        elif (encoding == 'combi'):
             X = pd.get_dummies(X, columns = ['prompt_type', 'device', 'prompt_description'])
             X = self.__feature_hasher(X, [('user_id', 10)])
             X = X.drop(['user_id'], axis=1)
@@ -253,7 +252,7 @@ class Batch:
 
         return X, y
 
-    def enhanced(self, data, encoder='combination'):
+    def enhanced(self, data, encoding='combination'):
 
         """The enhanced Random Forest model. Given the data and the 
         encode technique, it prepares the data and makes a model that 
@@ -266,7 +265,7 @@ class Batch:
         data : pd.Dataframe
             Dataset contains both features and classification.
 
-        encoder : str
+        encoding : str
             encoding technique
 
         Returns:
@@ -276,24 +275,24 @@ class Batch:
             Percentage that indicates the accuracy of the model.
         """       
 
-        X, y = self.prepare_data(data, encoder)
+        X, y = self.prepare_data(data, encoding)
 
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5)
 
-        forest = RandomForestClassifier(n_estimators=130, max_depth=5, min_samples_split=9,
-        min_samples_leaf=10, max_features=min(11, len(X.columns)))
+        forest = RandomForestClassifier(n_estimators=78, max_depth=8, min_samples_split=8,
+        min_samples_leaf=4, max_features=min(17, len(X.columns)))
 
         forest.fit(X_train,y_train)
 
         feature_imp = pd.Series(forest.feature_importances_,index=X.columns).sort_values(ascending=False)
-
-        # print(feature_imp)
+        print(feature_imp)
         # self.__vis_feat(feature_imp)
 
         y_pred = forest.predict(X_test)
 
         accuracy = metrics.accuracy_score(y_test, y_pred) * 100
-        print("BATCH ENHANCED", encoder, "Accuracy:", round(accuracy, 3))
+
+        print("BATCH ENHANCED", encoding, "Accuracy:", round(accuracy, 3))
 
         return accuracy
 

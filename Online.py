@@ -2,6 +2,7 @@ from datetime import datetime
 import pandas as pd
 
 from river import ensemble, stream, metrics, preprocessing as pp, compose
+import river
 
 class Online:
 
@@ -16,6 +17,33 @@ class Online:
         del x['room_y']
 
         return x
+
+    def __init_encoder(self, features, encoding):
+        
+        if (encoding == 'label'):
+            encoder = {}
+            for feat in features:
+                encoder[feat] = []
+
+        elif (encoding == 'ohe'):
+            # OneHotEncoding pipe. First the right features are chosen
+            # before they are passed to the encoder.
+            encoder = compose.Select(*features) | pp.OneHotEncoder()
+        
+        elif (encoding == 'none'):
+            encoder = None
+
+        return encoder
+
+    def __label_encoder(self, encoder, x, features):
+
+        for feat in features:
+            if not(x[feat] in encoder[feat]):
+                encoder[feat].append(x[feat])
+            
+            x[feat] = encoder[feat].index(x[feat])
+
+        return x, encoder
 
     def __calc_floor_dif(self, x):
         
@@ -40,7 +68,7 @@ class Online:
             del x[f]
         
         return x
-    
+
     def basic(self, X):
         """Simplest online learning model that serves as comparison for other models."""
 
@@ -85,66 +113,76 @@ class Online:
 
         return float(metric.get())
 
-    def first_modification(self, X):
+    def prepare_data(self, x, encoder, encoding, cat_variables):
+
+        # Make sure that the features are understood well by the model.
+        x = self.__calc_dist(x)     
+        x = self.__calc_floor_dif(x)
+        x = self.__date_mod(x)
+
+        if (encoding == 'ohe'):
+            # Memorise features and encode them into OHE features
+            encoder = encoder.learn_one(x)
+            xi = encoder.transform_one(x)
+
+            # Combines the normal and encoded features.
+            x = self.drop_features(x, cat_variables)
+            x = x | xi
+
+        elif (encoding == 'label'):
+            x, encoder = self.__label_encoder(encoder, x, cat_variables)
+
+        elif (encoding == 'none'):
+            for feat in cat_variables:
+                del x[feat]
         
-        model = ensemble.AdaptiveRandomForestClassifier( 
-            n_models=3,
-            seed=42
-        )
+        return x, encoder
+        
+    def __init_RF(self, hyper_params):
 
-        # For testing purposes
-        del X['prompt_type']
-        del X['device']
+        if hyper_params is None:
+            model = ensemble.AdaptiveRandomForestClassifier( 
+                n_models=70,
+                seed=42
+            )
+        else:
+            model = ensemble.AdaptiveRandomForestClassifier( 
+                n_models=hyper_params['n_models'],
+                max_features=hyper_params['max_features'],
+                max_depth=hyper_params['max_depth']
+            )
 
+        return model
 
-        OHE_features = ["prompt_description", "month"]
+    def advanced(self, X, encoding='ohe', hyper_params=None):
+        
+        cat_variables = ["prompt_description", "month", "prompt_type", "device"]
 
-        # OneHotEncoding pipe. First the right features are chosen
-        # before they are passed to the encoder.
-        OHE = compose.Select( *OHE_features) | pp.OneHotEncoder()
+        model = self.__init_RF(hyper_params)
 
-        # The metric measures how good the models performs.
+        encoder = self.__init_encoder(cat_variables, encoding)
         metric = metrics.Precision()
 
         y = X.pop('classification')
         i = 0
 
+        y_pred = None
+
         # As the model works online, the data is accessed per record.
         for xi, yi in stream.iter_pandas(X, y):
             
-            # Make sure that the features are understood well by the model.
-            xi = self.__calc_dist(xi)     
-            xi = self.__calc_floor_dif(xi)
-            xi = self.__date_mod(xi)
-
-            # adds the features to the encoder. In order to memorise
-            # what categories have passed (in online only one category 
-            # at the time is seen).
-            OHE = OHE.learn_one(xi)
-
-            # The category is encoded in binary features.
-            xii = OHE.transform_one(xi)
-
-            # Combines the normal and encoded features.
-            xi = self.drop_features(xi, OHE_features)
-            xi = xi | xii
+            xi, encoder = self.prepare_data(xi, encoder, encoding, cat_variables)
 
             # predict outcome and update the model
             y_pred = model.predict_one(xi)
             model.learn_one(xi, yi)
 
-            # The first time, the model cannot predict and therefore returns
-            # None. None however, is not accepted by update().
-            if(y_pred != None):
+            # Predicting requires the model to have learned >= one.
+            if (y_pred != None): 
                 metric = metric.update(yi, y_pred)
 
-            # For testing purposes
-            if (i % 5000 == 0):
+            if (i % 10000 == 0):
                 print("#", i, round(float(metric.get() * 100), 2))
             i += 1
-        
+
         return float(metric.get())
-
-
-
-

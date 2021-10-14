@@ -312,6 +312,8 @@ class Dataset:
                 row = row._replace(total_weight=weight)
                 
                 classification = random.uniform(0, 1) <= weight
+                # classification = 0.5 <= weight
+
                 row = row._replace(classification=classification)
 
 
@@ -385,7 +387,7 @@ class Dataset:
 
             prompts = prompts.append(self.__generate_prompts_day(date, min_per_new_prompt, date_dep, prompt_goal))
         
-        prompts.to_csv("full.csv", index=False)
+        prompts.to_csv("output/full.csv", index=False)
         
         return(prompts)
 
@@ -411,7 +413,7 @@ class Dataset:
 
         df = df.drop(['user_weight', 'prompt_weight', 'total_weight'], axis=1)
 
-        df.to_csv("stripped.csv", index=False)
+        df.to_csv("output/stripped.csv", index=False)
 
         return(df)
 
