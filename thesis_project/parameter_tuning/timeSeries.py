@@ -1,10 +1,12 @@
 from sklearn import ensemble
-from Dataset import Dataset
 from time import perf_counter
-from Batch import Batch
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 import optuna
+
+from models.batch import Batch
+from dataset.dataset import Dataset
+
 
 env = Dataset(x_users=100)
 data = env.generate_prompts(period=365, min_per_new_prompt=10)

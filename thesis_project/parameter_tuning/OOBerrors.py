@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
-from Batch import Batch
-from Dataset import Dataset
+from models.batch import Batch
+from dataset.dataset import Dataset
 from collections import OrderedDict
 from sklearn.ensemble import RandomForestClassifier
 

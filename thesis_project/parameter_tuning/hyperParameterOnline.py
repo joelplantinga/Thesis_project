@@ -2,10 +2,10 @@ import optuna
 import pandas as pd
 from sklearn import ensemble
 from sklearn import model_selection
-from Batch import Batch
-from Dataset import Dataset
+from models.batch import Batch
+from dataset.dataset import Dataset
 from optuna.visualization.matplotlib import plot_param_importances
-from Online import Online
+from models.online import Online
 
 env = Dataset(x_users=100)
 data = env.generate_prompts(period=365, min_per_new_prompt=10)

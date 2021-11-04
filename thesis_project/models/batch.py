@@ -4,6 +4,7 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+from time import perf_counter
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -198,58 +199,6 @@ class Batch:
                                             max_features=min(params["max_features"], x_cols))
         return forest
 
-    def prepare_data(self, x_data, encoding, OHE):
-
-        """Function that prepares the data before it gets passed to 
-        the Random Forest model. It calculates the distance and floor
-        difference between user and prompt. Modifies the date feature and
-        encodes the categorical data in the encoder given by the user using 
-        encoding='ENCODER'.
-
-        Attributes:
-        ------------
-
-        x_data : pd.Dataframe
-            Dataset of all the features.
-
-        encoding : str
-            Encoding technique for the categorical variables. Either 'label' for 
-            label encoding, 'ohe' for One Hot Encoding, 'hashing' for hashing, 'combi' 
-            for a combination of both hashing and OHE and none for removing the categorical
-            variables.
-
-        Returns:
-        ------------
-
-        x_data : pd.Dataframe
-            Dataset that is rightly configured for the model.
-        
-        """
-
-        x_data = self.__calc_dist(x_data.copy())        
-        x_data = self.__calc_floor_dif(x_data.copy())   
-        x_data = self.__date_mod(x_data.copy())         
-
-        cat_variables = ['prompt_type', 'device', 'user_id', 'prompt_description']
-        hash_features = [('user_id', 8), ("prompt_description", 3), 
-                         ("prompt_type", 1), ("device", 3)]
-
-        if (encoding == 'label'):
-            x_data = self.__label_encoder(x_data, cat_variables)
-        elif (encoding == 'ohe'):
-            x_data = pd.get_dummies(x_data, columns = cat_variables)
-        elif (encoding == 'hashing'):
-            x_data = self.__feature_hasher(x_data, hash_features)
-            x_data = x_data.drop(cat_variables, axis=1)
-        elif (encoding == 'combi'):
-            x_data = pd.get_dummies(x_data, columns = ['prompt_type', 'device', 'prompt_description'])
-            x_data = self.__feature_hasher(x_data, [('user_id', 10)])
-            x_data = x_data.drop(['user_id'], axis=1)
-        else:
-            x_data = x_data.drop(cat_variables, axis=1)
-
-        return x_data
-
 
     def __ohe(self, data, OHE, i, cols):
         
@@ -267,9 +216,7 @@ class Batch:
 
         return data
 
-
-
-    def prepare_data1(self, datasets, encoding):
+    def prepare_data(self, datasets, encoding):
 
         """Function that prepares the data before it gets passed to 
         the Random Forest model. It calculates the distance and floor
@@ -312,6 +259,7 @@ class Batch:
 
             if (encoding == 'label'):
                 x_data = self.__label_encoder(x_data, cat_variables)
+            
             elif (encoding == 'ohe'):
                 
                 x_data = self.__ohe(x_data, OHE, i, cat_variables)
@@ -319,31 +267,28 @@ class Batch:
             elif (encoding == 'hashing'):
                 x_data = self.__feature_hasher(x_data, hash_features)
                 x_data = x_data.drop(cat_variables, axis=1)
+            
             elif (encoding == 'combi'):
                 x_data = self.__ohe(x_data, OHE, i, ['prompt_type', 'device', 'prompt_description'])
                 x_data = self.__feature_hasher(x_data, [('user_id', 10)])
                 x_data = x_data.drop(['user_id'], axis=1)
+            
             else:
                 x_data = x_data.drop(cat_variables, axis=1)
             
             out.append(x_data)
 
-        return (out[0], out[1])
+        if(len(datasets) == 1):
+            return (out[0])
+        else:
+            return (out[0], out[1])
 
-    def init_encoding(self, encoding):
-            print("init_encoding")
+    # def init_encoding(self, encoding):
 
-            cat_variables = ['prompt_type', 'device', 'user_id', 'prompt_description']
+    #         cat_variables = ['prompt_type', 'device', 'user_id', 'prompt_description']
 
-            if(encoding == 'ohe'):
-                OHE = OneHotEncoder(handle_unknown='ignore')
-
-
-
-
-
-
-
+    #         if(encoding == 'ohe'):
+    #             OHE = OneHotEncoder(handle_unknown='ignore')
 
     def test_model(self, data, hyper_params=None, feature_engineering=True, encoding='ohe', test_size=0.5):
 
@@ -351,25 +296,66 @@ class Batch:
 
         train_x, test_x, train_y, test_y = train_test_split(data, y, test_size=test_size)
 
-        pred_y = self.batch_model(train_x, train_y, test_x, hyper_params=hyper_params,
+        pred_y = self.core_model(train_x, train_y, test_x, hyper_params=hyper_params,
                                   feature_engineering=feature_engineering, encoding=encoding)
         
         accuracy = metrics.accuracy_score(test_y, pred_y) * 100
 
         return accuracy
 
+    def batch_system(self, data, class_pred, encoding='ohe', hyper_params=None, feature_engineering=True, print_freq=1):
+        
+        train_x = pd.DataFrame()
+        train_y = pd.Series()
+
+        test_res = {"accuracy":[], "size":[], "time":[]}
+
+        for i, chunk in enumerate(data):
+            
+            time = perf_counter()
+
+            test_y = chunk.pop("classification")
+
+            if(not class_pred):
+                weights = chunk.pop('total_weight')
+                chunk = chunk.drop(['user_weight', 'prompt_weight'], axis=1)
+
+            pred_y = self.core_model(train_x.copy(), train_y.copy(), chunk.copy(), hyper_params=hyper_params, 
+                                    feature_engineering=feature_engineering, encoding=encoding, class_pred=class_pred)
+
+            train_x = train_x.append(chunk)
+            train_y = train_y.append(test_y)
+
+            time_measured = perf_counter() - time
+
+            if(pred_y is None):
+                continue
+            
+            if class_pred:
+                accuracy = metrics.accuracy_score(test_y, pred_y) * 100
+            else:
+                pred_y = [item[1] for item in pred_y]
+                accuracy = metrics.mean_absolute_error(weights, pred_y)
+
+            test_res['time'].append(time_measured)
+            test_res['accuracy'].append(accuracy)
+            test_res['size'].append(len(chunk))
+
+            if(isinstance(print_freq, int) and i % print_freq == 0):
+                print("#", i, "(size:", len(test_y), ")",  "acc:", round(accuracy, 3), 
+                      "time:", round(time_measured, 3)) # "tot acc", round(tot_acc / tot_len, 3)
+
+        return test_res
 
 
-
-    def batch_model(self, train_x, train_y, test_x, hyper_params=None, 
-                    feature_engineering=True, encoding='ohe', probability=False):
+    def core_model(self, train_x, train_y, test_x, hyper_params=None, 
+                    feature_engineering=True, encoding='ohe', class_pred=True):
                 
         if(train_x.empty or train_y.empty):
             return None
 
         if(feature_engineering):
-            train_x, test_x = self.prepare_data1([train_x, test_x], encoding)
-            
+            train_x, test_x = self.prepare_data([train_x, test_x], encoding) 
         else:
             train_x = train_x.drop(['date_time', 'prompt_type', 'prompt_description', 'device'], axis=1)
             test_x = test_x.drop(['date_time', 'prompt_type', 'prompt_description', 'device'], axis=1)
@@ -378,10 +364,10 @@ class Batch:
         
         RF.fit(train_x,train_y)
         
-        if(probability):
-            pred_y = RF.predict_proba(test_x)
-        else:    
+        if(class_pred):
             pred_y = RF.predict(test_x)
+        else:    
+            pred_y = RF.predict_proba(test_x)
 
         return pred_y
         

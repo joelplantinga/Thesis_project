@@ -1,8 +1,11 @@
 from datetime import datetime
 import pandas as pd
-
 from river import ensemble, stream, metrics, preprocessing as pp, compose
 import river
+from time import perf_counter
+from sklearn import metrics as sk_metrics
+from random import random
+
 
 class Online:
 
@@ -154,111 +157,73 @@ class Online:
 
         return model
 
-
-
-    def model(self, data, encoding='ohe', hyper_params=None, print_every='100'):
-
+    def online_model(self, data_blocks, hyper_params=None, encoding='ohe', class_pred=True, 
+                     feature_engineering=True, print_freq=1):
+        
         cat_variables = ["prompt_description", "month", "prompt_type", "device"]
-
         model = self.__init_RF(hyper_params)
-
         encoder = self.__init_encoder(cat_variables, encoding)
-        metric = metrics.Precision()
+        
+        test_res = {"accuracy":[], "size":[], "time":[]}
 
-        y = data.pop('classification')
-        i = 0
+        for i, block in enumerate(data_blocks):
+            
+            time = perf_counter()
+            
+            y_true = block.pop('classification')
 
-        y_pred = None
-        prev_date = None
+            if(not class_pred):
+                weights = block.pop('total_weight')
+                block = block.drop(['user_weight', 'prompt_weight'], axis=1)
+
+            y_pred, model, encoder = self.core_model(block, y_true, model, cat_variables, encoder, encoding, class_pred)
+            
+            time_measured = perf_counter() - time
+
+            if class_pred:
+                accuracy = sk_metrics.accuracy_score(y_true, y_pred) * 100
+            else:
+                accuracy = sk_metrics.mean_absolute_error(weights, y_pred)
+
+            test_res['accuracy'].append(accuracy)
+            test_res['size'].append(len(block))
+            test_res['time'].append(time_measured)
+
+            if(isinstance(print_freq, int) and i % print_freq == 0):
+                print("#", i, "(size:", len(block), ")",  "acc:", round(accuracy, 3), 
+                      "time:", round(time_measured, 3))
+            
+        return test_res
+
+    def core_model(self, data, y, model, cat_variables, encoder, encoding, class_pred):
+        
+        y_pred_list = []
 
         # As the model works online, the data is accessed per record.
         for xi, yi in stream.iter_pandas(data, y):
                                     
-            show, prev_date = self.print_freq(print_every, xi, i, prev_date)
-
             xi, encoder = self.prepare_data(xi, encoder, encoding, cat_variables)
-
+            
             # predict outcome and update the model
-            y_pred = model.predict_one(xi)
+            if(class_pred):
+                y_pred = model.predict_one(xi)
+            else:
+                y_pred = model.predict_proba_one(xi)
+            
+            if(y_pred == None): 
+                ran = random()
+                y_pred is (ran > 0.5) if class_pred else {False: ran, True: 1-ran}
+            
+            if(y_pred == {False: 1}):
+                y_pred = {False: 1, True: 0}
+            elif(y_pred == {True: 1}):
+                y_pred = {False: 0, True: 1}
+
+            y_pred_list.append(y_pred[1])
             model.learn_one(xi, yi)
 
-            # Predicting requires the model to have learned >= one.
-            if (y_pred != None): 
-                metric = metric.update(yi, y_pred)
-
-            
-            if (show):
-                print(prev_date)
-                print("#", i, round(float(metric.get() * 100), 2))
-            i += 1
-
-        return float(metric.get())
+        return y_pred_list, model, encoder
 
 
-    def print_freq(self, print_every, xi, i, prev_dt):
-        
-        show = False
-        if(isinstance(print_every, int)):
-            if(i % print_every == 0):
-                show = True
-        else:
-            date = xi['date_time'].date()
-            week = xi['date_time'].isocalendar()
-            month = xi['date_time'].month
-            year = xi['date_time'].year
-
-            if(prev_dt == None): 
-                pass
-                # return show, {'date':date, 'week':week, 'month':month, 'year':year}
-            elif(print_every == 'daily'):
-                if date > prev_dt['date']:
-                    show = True
-            elif(print_every == 'weekly'):
-                if (week > prev_dt['date'] or year > prev_dt['year']):
-                    show = True
-            elif(print_every == 'monthly'):
-                if (week > prev_dt['date'] or year > prev_dt['year']):
-                    show = True
-            
-        return show, {'date':date, 'week':week, 'month':month, 'year':year}
-
-
-
-
-
-
-
-    def advanced(self, X, encoding='ohe', hyper_params=None):
-        
-        cat_variables = ["prompt_description", "month", "prompt_type", "device"]
-
-        model = self.__init_RF(hyper_params)
-
-        encoder = self.__init_encoder(cat_variables, encoding)
-        metric = metrics.Precision()
-
-        y = X.pop('classification')
-        i = 0
-
-        y_pred = None
-
-        # As the model works online, the data is accessed per record.
-        for xi, yi in stream.iter_pandas(X, y):
-            
-            xi, encoder = self.prepare_data(xi, encoder, encoding, cat_variables)
-
-            # predict outcome and update the model
-            y_pred = model.predict_one(xi)
-            model.learn_one(xi, yi)
-
-            # Predicting requires the model to have learned >= one.
-            if (y_pred != None): 
-                metric = metric.update(yi, y_pred)
-
-            if (i % 100 == 0):
-                print("#", i, round(float(metric.get() * 100), 2))
-            i += 1
-
-        return float(metric.get())
 
 

@@ -12,7 +12,7 @@ for key in test_results:
 
     for i in range(x):
 
-        data = env.generate_prompts(period=365, min_per_new_prompt=10)
+        data = env.generate_dataset(period=365, min_per_new_prompt=10, exclude_weights=False)
         weights = data["total_weight"]
         
         avg_weight = 0
