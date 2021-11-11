@@ -1,1 +1,8 @@
 progress/
+__pycache__/
+.vscode
+backup.py
+create_plots.py
+outputs/
+backup/
+.DS_Store
