@@ -5,9 +5,31 @@ import river
 from time import perf_counter
 from sklearn import metrics as sk_metrics
 from random import random
-
+import pickle
+from preprocessing.online import MultiLabelEncoder, MultiOneHotEncoder, NoEncoder
+import easygui as g
 
 class Online:
+
+    def __init__(self, encoding, feature_engineering=True, hyper_params=None):
+
+        self.encoder = self.__init_encoding(encoding)
+        self.RF = self.__init_RF(hyper_params)
+        self.feature_engineering = feature_engineering
+
+    def __init_encoding(self, encoding):
+
+        if(encoding == 'label'):
+            encoder = MultiLabelEncoder(
+                ['prompt_type', 'device', 'prompt_description'])
+        if(encoding == 'ohe'):
+            encoder = MultiOneHotEncoder(
+                ['prompt_type', 'device', 'user_id', 'prompt_description'])
+        if(encoding == 'none'):
+            encoder = NoEncoder(
+                ['prompt_type', 'device', 'prompt_description'])
+
+        return encoder
 
     def __calc_dist(self, x):
         x['dist'] = round(pow(pow(x['room_x'] - x['user_x'], 2) + 
@@ -20,33 +42,6 @@ class Online:
         del x['room_y']
 
         return x
-
-    def __init_encoder(self, features, encoding):
-        
-        if (encoding == 'label'):
-            encoder = {}
-            for feat in features:
-                encoder[feat] = []
-
-        elif (encoding == 'ohe'):
-            # OneHotEncoding pipe. First the right features are chosen
-            # before they are passed to the encoder.
-            encoder = compose.Select(*features) | pp.OneHotEncoder()
-        
-        elif (encoding == 'none'):
-            encoder = None
-
-        return encoder
-
-    def __label_encoder(self, encoder, x, features):
-
-        for feat in features:
-            if not(x[feat] in encoder[feat]):
-                encoder[feat].append(x[feat])
-            
-            x[feat] = encoder[feat].index(x[feat])
-
-        return x, encoder
 
     def __calc_floor_dif(self, x):
         
@@ -66,103 +61,80 @@ class Online:
         del x["date_time"]
         return x
 
-    def drop_features(self, x, features):
-        for f in features:
-            del x[f]
-        
+    def prepare_data(self, x):
+
+        if(self.feature_engineering):
+
+            # Make sure that the features are understood well by the model.
+            x = self.__calc_dist(x)
+            x = self.__calc_floor_dif(x)
+            x = self.__date_mod(x)
+
+            self.encoder.learn_one(x)
+            x = self.encoder.transform_one(x)
+
+        else:
+            for feat in ['date_time', 'prompt_type', 'prompt_description', 'device']:
+                del x[feat]
+
         return x
 
-    def basic(self, X):
-        """Simplest online learning model that serves as comparison for other models."""
-
-        model = ensemble.AdaptiveRandomForestClassifier( 
-            n_models=3,
-            seed=42
-        )
-
-        # The metric measures how good the models performs.
-        metric = metrics.Precision()
-
-        y = X.pop('classification')
-
-        i = 0
-
-        # As the model works online, the data is accessed per record.
-        for xi, yi in stream.iter_pandas(X, y):
-            
-            # Delete categorical variables for now.
-            del xi['date_time']
-            del xi['prompt_type']
-            del xi['prompt_description']
-            del xi['device']
-
-
-            # The model does the prediction first --
-            y_pred = model.predict_one(xi)
-
-            # -- And learns from that record directly afterwards.
-            model.learn_one(xi, yi)
-
-            # The first time, the model cannot predict and therefore returns
-            # None. None however, is not accepted by update().
-            if(y_pred != None):
-                metric = metric.update(yi, y_pred)
-
-            
-            # For testing purposes.
-            if (i % 5000 == 0):
-                print("#", i, round(float(metric.get() * 100), 2))  
-            i += 1
-
-        return float(metric.get())
-
-    def prepare_data(self, x, encoder, encoding, cat_variables):
-
-        # Make sure that the features are understood well by the model.
-        x = self.__calc_dist(x)     
-        x = self.__calc_floor_dif(x)
-        x = self.__date_mod(x)
-
-        if (encoding == 'ohe'):
-            # Memorise features and encode them into OHE features
-            encoder = encoder.learn_one(x)
-            xi = encoder.transform_one(x)
-
-            # Combines the normal and encoded features.
-            x = self.drop_features(x, cat_variables)
-            x = x | xi
-
-        elif (encoding == 'label'):
-            x, encoder = self.__label_encoder(encoder, x, cat_variables)
-
-        elif (encoding == 'none'):
-            for feat in cat_variables:
-                del x[feat]
-        
-        return x, encoder
-        
+    # TODO: Needs revision. Make this function more neat.
     def __init_RF(self, hyper_params):
 
         if hyper_params is None:
-            model = ensemble.AdaptiveRandomForestClassifier( 
+            model = ensemble.AdaptiveRandomForestClassifier(
                 n_models=70,
                 seed=42
             )
         else:
-            model = ensemble.AdaptiveRandomForestClassifier( 
+            model = ensemble.AdaptiveRandomForestClassifier(
                 n_models=hyper_params['n_models'],
                 max_features=hyper_params['max_features'],
                 max_depth=hyper_params['max_depth']
             )
 
         return model
+    
+    def predict_one(self, x, class_pred, pp_first=True):
 
-    def online_model(self, data_blocks, hyper_params=None, encoding='ohe', class_pred=True, 
-                     feature_engineering=True, print_freq=1):
+        if pp_first:
+            x = self.prepare_data(x)
+
+        # predict outcome and update the model
+        if(class_pred):
+            y_pred = self.RF.predict_one(x)
+        else:
+            y_pred = self.RF.predict_proba_one(x)
+
+            if len(y_pred) == 1: # make sure it will be a tuple. 
+                y_pred[not next(iter(y_pred))] = 0
+
+        # TODO: In the batch model we did not use random for no data but instead kept it None.
+        if(y_pred == None):
+            y_pred = (random() > 0.5)
         
-        cat_variables = ["prompt_description", "month", "prompt_type", "device"]
-        model = self.__init_RF(hyper_params)
-        encoder = self.__init_encoder(cat_variables, encoding)
+        return y_pred, x
+
+    def train_predict_many(self, X, Y, class_pred):
+
+        y_pred_list = []
+
+        # As the model works online, the data is accessed per record.
+        for xi, yi in stream.iter_pandas(X, Y):
+
+            y_pred, xi = self.predict_one(xi, class_pred)
+
+            if not class_pred:
+                y_pred = y_pred[True]
+            
+            y_pred_list.append(y_pred)
+            
+            self.RF.learn_one(xi, yi)
+
+        return y_pred_list
+
+    def online_model(self, data_blocks, class_pred=True, print_freq=1):
         
         test_res = {"accuracy":[], "size":[], "time":[]}
 
@@ -176,7 +148,7 @@ class Online:
                 weights = block.pop('total_weight')
                 block = block.drop(['user_weight', 'prompt_weight'], axis=1)
 
-            y_pred, model, encoder = self.core_model(block, y_true, model, cat_variables, encoder, encoding, class_pred)
+            y_pred = self.train_predict_many(block, y_true, class_pred)
             
             time_measured = perf_counter() - time
 
@@ -191,39 +163,13 @@ class Online:
 
             if(isinstance(print_freq, int) and i % print_freq == 0):
                 print("#", i, "(size:", len(block), ")",  "acc:", round(accuracy, 3), 
-                      "time:", round(time_measured, 3))
+                        "time:", round(time_measured, 3))
             
         return test_res
 
-    def core_model(self, data, y, model, cat_variables, encoder, encoding, class_pred):
-        
-        y_pred_list = []
+    def save_model(self, filename):
 
-        # As the model works online, the data is accessed per record.
-        for xi, yi in stream.iter_pandas(data, y):
-                                    
-            xi, encoder = self.prepare_data(xi, encoder, encoding, cat_variables)
-            
-            # predict outcome and update the model
-            if(class_pred):
-                y_pred = model.predict_one(xi)
-            else:
-                y_pred = model.predict_proba_one(xi)
-            
-            if(y_pred == None): 
-                ran = random()
-                y_pred is (ran > 0.5) if class_pred else {False: ran, True: 1-ran}
-            
-            if(y_pred == {False: 1}):
-                y_pred = {False: 1, True: 0}
-            elif(y_pred == {True: 1}):
-                y_pred = {False: 0, True: 1}
+        path = g.diropenbox()
 
-            y_pred_list.append(y_pred[1])
-            model.learn_one(xi, yi)
-
-        return y_pred_list, model, encoder
-
-
-
-
+        with open(path+"/"+filename+".pickle", "wb") as output_file:
+            pickle.dump(self, output_file)

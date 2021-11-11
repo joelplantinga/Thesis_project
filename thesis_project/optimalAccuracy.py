@@ -1,4 +1,4 @@
-from dataset import Dataset
+from dataset.dataset import Dataset
 import os
 test_results = {10:[], 50:[], 100:[], 500:[],1000:[]}
 print("START TEST")
@@ -12,20 +12,13 @@ for key in test_results:
 
     for i in range(x):
 
-        data = env.generate_dataset(period=365, min_per_new_prompt=10, exclude_weights=False)
-        weights = data["total_weight"]
+        accuracy = env.test_dataset_accuracy()
+        print(accuracy)
         
-        avg_weight = 0
-
-        for weight in weights:
-            avg_weight += max(weight, 1 - weight)
-        
-        avg_weight /= len(weights)
-        
-        test_results[key].append(avg_weight) 
+        test_results[key].append(accuracy) 
 
 
-        print("run:", i, "weight:", avg_weight)
+        print("run:", i, "weight:", accuracy)
 
 print("-----------------------")
 

@@ -439,4 +439,17 @@ class Dataset:
 
         return(df)
 
+    def test_dataset_accuracy(self, period=365, min_per_new_prompt=10, date_dep=True):
+
+        data = self.generate_dataset(period=period, min_per_new_prompt=min_per_new_prompt,
+                                     date_dep=date_dep, exclude_weights=False)
+        
+        weights = data["total_weight"]
+        avg_weight = 0
+
+        for weight in weights:
+            avg_weight += max(weight, 1 - weight)
+
+        return(avg_weight / len(weights))
+        
 

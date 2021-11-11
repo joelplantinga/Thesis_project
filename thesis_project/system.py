@@ -9,307 +9,52 @@ import matplotlib.pyplot as plt
 import string
 import copy
 from itertools import zip_longest
+import pickle
+import easygui as g
 
 
-def split_data_on_date(data, frequency="daily"):
+def create_system(model_type, class_pred=True, encoding='ohe',
+                  print_freq=1, feature_engineering=True, hyper_params=None, 
+                  df_size=365):
 
-    if(frequency == "daily"):
+    ba = Batch(encoding, hyper_params, feature_engineering)
 
-        cols = ["date"]
-        data['date'] = data['date_time'].dt.date
+    env = Dataset()
+    data = env.generate_dataset()
 
-        data = data.groupby(['date'])
+    accuracy = ba.test_model(data)
 
-    elif(frequency == "weekly"):
+    print("accuracy of the system:", accuracy)
 
-        cols = ["week", "year"]
-        data['week'] = data['date_time'].dt.isocalendar().week
-        data['year'] = data['date_time'].dt.year
+    ba.save_model('first_model_of_the_day')
 
-        data = data.groupby(['week', 'year'])
 
-    elif(frequency == "monthly"):
+def predict_weights(model_type):
 
-        cols = ["month", "year"]
-        data['month'] = data['date_time'].dt.month
-        data['year'] = data['date_time'].dt.year
+    env = Dataset()
+    data = env.generate_dataset()
+    data = data.sample(n=5)
 
-        data = data.groupby(['month', 'year'])
+    Y = data.pop('classification')
 
-    data = [data.get_group(x) for x in data.groups]
+    filename = g.fileopenbox()
+    file = open(filename,'rb')
 
-    # Helper columns must be deleted again
-    data = [x.drop(cols, axis=1) for x in data]
+    model = pickle.load(file)
 
-    return data
-
-def split_data_int(data, n):
-
-    list = []
-    for i in range(0, len(data), n):
-        list.append(data[i:i+n])
-
-    return list
-
-def print_info(chunk_size, class_pred, model_type, encoding):
-    print("-----------------------------------")
-    print("START OF THE SYSTEM")
-    print("Running in", model_type, "mode")
-
-    print("Running system in chunks of size:", chunk_size)
-    print("Using", encoding, "as feature encoder")
-
-    if class_pred:
-        print("Testing system using class predictions")
-    else:
-        print("Testing system using probability difference")
-    print("-----------------------------------")
-
-def test_encoding(model_type, chunk_size="daily", class_pred=True, print_freq=10, 
-                  hyper_params=None, df_size=365, x=3):
-
-    results = {"No_feature_engineering": [],
-               "label": [],
-               "ohe": [],
-               "none": []
-               }
-    out = {}
-
-    for i in range(x):
-        print("XXXXXXXXXXXX TEST ROUND", i)
-        data = make_data(chunk_size, class_pred, df_size)
-        
-        for key in results:
-
-            if(key == "No_feature_engineering"):
-                res = run_system(model_type, chunk_size, class_pred, 'none',
-                                 print_freq, False, hyper_params,
-                                 df_size, copy.deepcopy(data), False)
-            else:
-                res = run_system(model_type, chunk_size, class_pred, key,
-                                 print_freq, True, hyper_params,
-                                 df_size, copy.deepcopy(data), False)
-
-            results[key].append(res)
+    if(model_type == 'batch'):
+        pred_y = model.predict(data, class_pred=False)
     
+    print([pred[1] for pred in pred_y])
+    # print(pred_y)
 
 
-    for key in results:
-        df = pd.DataFrame()
-        i = 0
-        for res in results[key]:
-            
-            i += 1
 
-            if (len(df) == 0):
-                df = res
-                continue
+create_system('batch', encoding='ohe')
+# predict_weights('batch')
 
-            df['index'] = df['index'] if (
-                len(df['index']) > len(res['index'])) else res['index']
-            
-            old_size = df['size'].copy()
-            
-            df['size'] = add_cols(res['size'],old_size)
-            
-            df['accuracy'] = add_cols(
-                df['accuracy'] * old_size, res['accuracy'] * res['size']) / df['size']
 
-            df['cum_accuracy'] = add_cols(
-                df['cum_accuracy'] * old_size.cumsum(), res['cum_accuracy'] * res['size'].cumsum()) / \
-                    df['size'].cumsum()
 
 
-            df['time'] = add_cols(df['time'] * (i-1), res['time']) / i
 
 
-            # if(key == "none"):
-            #     print("---------- BEFORE ----------")
-            #     print('df size:', '\n', df['size'])
-            #     print('new_result size:', '\n', res['size'])
-            #     print('df cumsum:', '\n', df['size'].cumsum())
-            #     print('df_time:', '\n', df['cum_time'])
-            #     print('res_time:', '\n', res['cum_time'])
-            #     print("sum:", add_cols(df['time'] * (i-1), res['time']))
-            #     print("i:", i)
-
-
-            df['cum_time'] = add_cols(df['cum_time'] * (i-1), res['cum_time']) / i
-
-            # if(key == "none"):
-            #     print("---------- AFTER ------------")
-            #     print('df size:', '\n', df['size'])
-            #     print('new_result size:', '\n', res['size'])
-            #     print('df cumsum:', '\n', df['size'].cumsum())
-            #     print('df time:', '\n', df['cum_time'])
-            #     print('res_time:', '\n', res['cum_time'])
-
-            
-        df.to_csv("plots/encoder_test_" + model_type + "_" + key + ".csv")    
-        out[key] = df
-
-    plot_encoding_test(out)
-
-
-def plot_encoding_test(results):
-    
-    
-    colors = ['red', 'brown', 'darkred', 'firebrick', 'red', 'tomato', 'lightcoral']
-    y_axis = {'name': 'Accuracy', 'data': []}
-
-    for i, key in enumerate(results):
-        df = results[key]
-        y_axis['data'].append(
-            {'obj': df['accuracy'], 'name': key, 'col': colors[i]}
-        )
-
-        if(i==0):
-            x_axis = {'obj': df['index'], 'name': 'Measurements', 'col': None}
-
-    make_graph(x_axis,
-               y_ax_1=y_axis)
-    
-    plt.show()
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-def add_cols(col1, col2):
-    return np.array([sum(x) for x in zip_longest(col1, col2, fillvalue=0)]).copy()
-
-
-def make_data(chunk_size, class_pred, df_size):
-    env = Dataset(x_users=100)
-    data = env.generate_dataset(period=df_size, exclude_weights=class_pred)
-
-    if(isinstance(chunk_size, int)):
-        data = split_data_int(data, chunk_size)
-    else:
-        data = split_data_on_date(data, chunk_size)
-    return data
-
-
-
-
-
-
-
-
-def system(model_type, chunk_size="daily", class_pred=True, encoding='ohe',
-               print_freq=1, feature_engineering=True, hyper_params=None, df_size=365, plot_data=False):
-
-    data = make_data(chunk_size, class_pred, df_size)
-
-    results = []
-    if(model_type == "both"):
-        results.append(run_system('online', chunk_size, class_pred, encoding, print_freq,
-                                  feature_engineering, hyper_params, df_size, copy.deepcopy(data), plot_data))
-        
-        results.append(run_system('batch', chunk_size, class_pred, encoding, print_freq,
-                                  feature_engineering, hyper_params, df_size, data, plot_data))
-    else:
-        results.append(run_system(model_type, chunk_size, class_pred, encoding, print_freq,
-                                  feature_engineering, hyper_params, df_size, data, plot_data))
-
-    if(plot_data):
-        plt.show()
-
-    return(results)
-
-
-def run_system(model_type, chunk_size, class_pred, encoding, print_freq, 
-               feature_engineering, hyper_params, df_size, data, plot_data):
-
-    print_info(chunk_size, class_pred, model_type, encoding)
-
-    if(model_type == "batch"):
-        ba = Batch()
-        results = ba.batch_system(data, class_pred, encoding=encoding, hyper_params=hyper_params,
-                                  feature_engineering=feature_engineering, print_freq=print_freq)
-    elif(model_type == "online"):
-        on = Online()
-        results = on.online_model(data, hyper_params=hyper_params, encoding=encoding, class_pred=class_pred,
-                                  feature_engineering=feature_engineering, print_freq=print_freq)
-
-    results = pd.DataFrame.from_dict(results)
-
-    results['cum_accuracy'] = (
-        (results['accuracy'] * results['size']).cumsum()) / results['size'].cumsum()
-    results['cum_time'] = results['time'].cumsum()
-    results['index'] = results.index
-    results['cum_time'] = results['time'].cumsum() / (results['index'] + 1)
-
-    ran_string = ''.join(random.choices(
-        string.ascii_uppercase + string.digits, k=3))
-    filename = model_type + "_enc-" + encoding + "_cs-" + \
-        str(chunk_size) + "_dfs-" + str(df_size) + "_" + ran_string + ".csv"
-
-    results.to_csv("plots/" + filename)
-
-    if not(plot_data):
-        return results
-
-    make_graph({'obj': results['index'], 'name': "Measurements", 'col': None},
-               y_ax_1={'name': 'Accuracy',
-                       'data': [{'obj': results['accuracy'], 'name': "Accuracy", 'col': 'red'},
-                                {'obj': results['cum_accuracy'], 'name': "Cumulative accuracy", 'col': 'darkred'}]},
-               y_ax_2={'name': 'Time',
-                       'data': [{'obj': results['cum_time'], 'name': "Cumulative average time ", 'col': 'blue'}]})
-
-    return results
-
-
-def make_graph(x_axis, y_ax_1, y_ax_2=None):
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-
-    ax.set_xlabel(x_axis['name'], fontsize=14)
-    for axis in y_ax_1['data']:
-        ax.plot(x_axis['obj'], axis['obj'], color=axis['col'],
-                marker="o", label=axis['name'])
-
-    ax.set_ylabel(y_ax_1['name'], color=axis['col'], fontsize=14)
-
-    if(y_ax_2 != None):
-        ax2 = ax.twinx()
-        for axis in y_ax_2['data']:
-            ax2.plot(x_axis['obj'], axis['obj'], color=axis['col'],
-                    marker="o", label=axis['name'])
-
-        ax2.set_ylabel(y_ax_2['name'], color=axis['col'], fontsize=14)
-
-    fig.legend(loc='upper left')
-    plt.show(block=False)
-    # save the plot as a file
-    # fig.savefig('two_different_y_axis_for_single_python_plot_with_twinx.jpg',
-    #             format='jpeg',
-    #             dpi=100,
-    #             bbox_inches='tight')
-
-
-test_encoding('batch', chunk_size='weekly', print_freq="weekly", df_size=365, x=3)
-# system('batch', chunk_size="weekly", class_pred=False,
-#            df_size=100, print_freq=1, encoding="none")
-# new_system('online', chunk_size=40, class_pred=False, df_size=365, print_freq=5)
-
-
-# TODO: currently, combi encoding is not working
-# TODO: make it work for the final goal; it should be able to first train the model on some data
-# ----- and then predict on some other data. Core functions should return model.
-# TODO: For the online model, feature_engineering parameter is not yet implemented
-# TODO: Currently, online is working better without feature engineering. Probably due to 
-#  ---- hyper_parameters that are passed when configured with None.
-# NOTE: what should we do with the first step of batch. The prediciton is always None as no
-#  ---- modeled prediction can be made. Should we keep it like this or make predictions?
-# NOTE: How is the cum_accuracy named correctly? Cumulative is not the right word imo.

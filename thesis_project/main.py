@@ -1,88 +1,130 @@
 
 
 
+from numpy import true_divide
 from dataset.dataset import Dataset
 from models.online import Online
 from models.batch import Batch
+import pickle
+from preprocessing.batch import MultiLabelEncoder, MultiOneHotEncoder, NoEncoder
 
 from time import perf_counter
 import pandas as pd
-
+import easygui as g
 
 from parameter_tuning.hyperParameter import opt_hyper_params
 
 
-opt_hyper_params()
-
-# print("-----------------------")
-
-# test_results = {"basic":[], "label":[], "ohe":[], "hash":[], "combi":[], "none":[]}
-
-
 # env = Dataset(x_users=100)
+# data = env.generate_dataset(period=365, exclude_weights=True, min_per_new_prompt=10)
 
-# print("START TEST")
+# ba = Batch('ohe', None, True)
 
-# on = Online()
-# batch = Batch()
+# # data = ba.test_model(data)
 
-# # data = env.generate_prompts(period=365, min_per_new_prompt=10)
-# # data = env.finish_dataset(data)
+# # print(data.columns)
+# accuracy = ba.test_model(data)
 
-# # print("classification == True", len(data[data.classification == True]))
-# # print("total size:", len(data))
+# print(accuracy)
 
+env = Dataset(x_users=100)
+data = env.generate_dataset(period=365, min_per_new_prompt=10)
+# Y = data.pop('classification')
 
-# x = 1
-# tot = 0
+# print("--------------------------------------------------------")
+# print("--------------------------------------------------------")
+# print("------------- OHE --------------------------------------")
 
-# for i in range(x):
-
-#     print("Round", i+1)
-#     time = perf_counter()
-
-
-#     data = env.generate_dataset(period=365)  
-
-#     # on.advanced(data.copy(), encoding='label')
-#     # batch.enhanced(data.copy(), encoding='label')
-#     # acc = batch.test_model(data.copy(), encoding='label')
-#     # print("label", acc)
-#     # acc = batch.test_model(data.copy(), encoding='ohe')
-#     # print("ohe", acc)
-#     # acc = batch.test_model(data.copy(), encoding='combi')
-#     # print("combi", acc)
-#     # acc = batch.test_model(data.copy(), encoding='hashing')
-#     # print("hashing", acc)
-
-#     acc = on.model(data.copy(), encoding='label', print_every='daily')
-#     print("hashing", acc)
-
-#     continue
-#     for key in test_results:
-
-#         if key == 'basic':
-#             test_results[key].append(batch.basic(data.copy()))
-#         else:
-#             test_results[key].append(batch.enhanced(data.copy(), encoding=key))    
-
-#     print("Time used: ", round(perf_counter() - time, 2), sep='')
-#     print("-----------------------")
+# opt_hyper_params('ohe', True, data.copy())
+# print("--------------------------------------------------------")
+# print("--------------------------------------------------------")
+# print("------------- LABEL ------------------------------------")
+# opt_hyper_params('label', True, data.copy())
+# print("--------------------------------------------------------")
+# print("--------------------------------------------------------")
+# print("------------- NONE -------------------------------------")
+# opt_hyper_params('none', True, data.copy())
+# print("--------------------------------------------------------")
+# print("--------------------------------------------------------")
+# print("------------- NO FEATURE ENGINEERING -------------------")
+# opt_hyper_params('none', False, data.copy())
 
 
+print("------------- OHE --------------------------------------")
 
-# """
-# print(tot/x)
-# print("Average accuracies over", x, "rounds:")
-# for key in test_results:
-#     average = round(sum(test_results[key]) / x, 3)
-#     minimum = round(min(test_results[key]), 3)
+ba = Batch('ohe')
+accuracy = ba.test_model(data.copy())
+print(accuracy)
+print(ba.feature_imp)
 
-#     print(key.upper(), "| ACCURACY -> AVG:", average, "MIN:", minimum)
-#     print([round(acc, 2) for acc in test_results[key]])
-#     print("-----------------------")
 
-# """
+print("------------- LABEL ------------------------------------")
+ba = Batch('label')
+accuracy = ba.test_model(data.copy())
+print(accuracy)
+print(ba.feature_imp)
+
+
+print("------------- NONE -------------------------------------")
+
+ba = Batch('none')
+accuracy = ba.test_model(data.copy())
+print(accuracy)
+print(ba.feature_imp)
+
+
+print("------------- NO FEATURE ENGINEERING -------------------")
+ba = Batch('none', feature_engineering=False)
+accuracy = ba.test_model(data.copy())
+print(accuracy)
+print(ba.feature_imp)
+
+
+
+# 0.6217757936507936 and parameters: 
+# {'rf_n_estimators': 300, 'rf_max_depth': 30, 'min_samples_split': 10, 'min_samples_leaf': 6}
+
+
+# 0.6156106962177788 and parameters: 
+# {'rf_n_estimators': 300, 'rf_max_depth': 20, 'min_samples_split': 2, 'min_samples_leaf': 6}
+
+# # on = Online('ohe', True, None)
+# ba.save_model('banana')
+
+# filename = g.fileopenbox()
+# file = open(filename,'rb')
+
+# on = pickle.load(file)
+
+# print(on.feature_engineering)
+
+
+
+
+
+
+# accuracy = ba.test_model(data)
+
+# print(accuracy)
+
+
+
+# data = env.generate_dataset(period=100, exclude_weights=True, min_per_new_prompt=10)
+
+# accuracy = ba.test_prediction(data)
+# # accuracy = ba.test_model(data)
+
+# print(accuracy)
+
+
+# print('first data before')
+# print(data.head())
+
+# data = NE.fit_transform(data)
+
+# print('first data after')
+# print(data.head())
+
 
 
 

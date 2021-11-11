@@ -9,11 +9,68 @@ from time import perf_counter
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn import metrics
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 from sklearn.feature_extraction import FeatureHasher
 
-class Batch:
+import preprocessing.batch as pp #import MultiLabelEncoder, MultiOneHotEncoder, NoEncoder
+import easygui as g
+import pickle
 
+
+class Batch():
+
+    def __init__(self, encoding, hyper_params=None, feature_engineering=True):
+
+        self.feature_engineering = feature_engineering
+        self.encoder = self.__init_encoding(encoding)
+        self.RF = self.__init_RF(hyper_params, encoding)
+        self.feature_imp = None
+
+    def __init_encoding(self, encoding):
+
+        if(encoding == 'ohe'):
+            encoder = pp.MultiOneHotEncoder(['prompt_type', 'device', 'user_id', 'prompt_description'])
+        elif(encoding == 'label'):
+            encoder = pp.MultiLabelEncoder(['prompt_type', 'device', 'prompt_description'])
+        elif(encoding == 'hash'):
+            encoder = pp.MultiFeatureHasher([('prompt_type', 2), ('device', 8),
+                                            ('user_id', 100), ('prompt_description', 25)])
+        elif(encoding == 'none'):
+            encoder = pp.NoEncoder(['prompt_type', 'device', 'prompt_description'])
+
+        return encoder
+
+    # TODO: Make sure the max_features/x_cols works correctly.
+    # NOTE: max cols protection is removed
+    def __init_RF(self, params, encoding, x_cols=20):
+        
+        if(encoding == 'ohe' and self.feature_engineering):
+            params = {"n_estimators": 300, "max_depth": 30, 
+                      "min_samples_split": 5, "min_samples_leaf": 6,
+                       "max_features":'auto'}
+        elif(params == "label" and self.feature_engineering):
+            params = {"n_estimators": 255, "max_depth": 5, 
+                      "min_samples_split": 2, "min_samples_leaf": 1,
+                       "max_features":'auto'}
+        elif(params == "none" and self.feature_engineering):
+            params = {"n_estimators": 500, "max_depth": 10, 
+                      "min_samples_split": 10, "min_samples_leaf": 5,
+                       "max_features":'auto'}
+        elif(params == "no_ft"):
+            params = {"n_estimators": 400, "max_depth": 10, 
+                      "min_samples_split": 2, "min_samples_leaf": 6,
+                       "max_features":'auto'}
+        elif(params==None):
+            params = {"n_estimators": 100, "max_depth": None, 
+                      "min_samples_split": 2, "min_samples_leaf": 1,
+                       "max_features":'auto'}
+
+
+        forest = RandomForestClassifier(n_estimators=params["n_estimators"], 
+                                        max_depth=params["max_depth"], 
+                                        min_samples_split=params["min_samples_split"],
+                                        min_samples_leaf=params["min_samples_leaf"], 
+                                        max_features=params["max_features"])
+        return forest
 
     def __calc_dist(self, df):
         
@@ -101,217 +158,71 @@ class Batch:
 
         return df
 
-    def __vis_feat(self, feature_imp):
+    def prepare_data(self, df):
         
-        # Creating a bar plot
-        sns.barplot(x=feature_imp, y=feature_imp.index)
-        # Add labels to your graph
-        plt.xlabel('Feature Importance Score')
-        plt.ylabel('Features')
-        plt.title("Visualizing Important Features")
-        plt.legend()
-        plt.show()
+        if(self.feature_engineering):
 
-    def __label_encoder(self, df, features):
+            # delete correlated features
+            # df = df.drop(['team', 'team_prompts', 'has_location'], axis=1)
 
-        """Function that uses the label encoding technique for the 
-        categorical features.
+            df = self.__calc_dist(df.copy())        
+            df = self.__calc_floor_dif(df.copy())   
+            df = self.__date_mod(df.copy()) 
+            # df = df.drop(['date_time'], axis=1)
 
-        Attributes:
-        ------------
+            df = self.encoder.fit_transform(df)
 
-        df : pd.Dataframe
-            Dataset that containing categorical features.
-
-        features : list[str]
-            List of feature names
-
-        Returns:
-        ------------
-
-        df : pd.Dataframe
-            Dataset containing label encoded features 
-
-        """        
-        
-        LE = LabelEncoder()
-
-        for feature in features:
-
-            df[feature] = LE.fit_transform(df[feature])
+        else:
+            df = df.drop(['date_time', 'prompt_type', 'prompt_description', 'device'], axis=1)
 
         return df
 
-    def __feature_hasher(self, df, features):
+    def train(self, train_x, train_y):
         
-        """Function that uses the hashing technique for the 
-        categorical features.
+        if(train_x.empty or train_y.empty):
+            print("RETURN: Cannot train model on empty dataset.")
+            return None
 
-        Attributes:
-        ------------
+        train_x = self.prepare_data(train_x)
 
-        df : pd.Dataframe
-            Dataset that containing categorical features.
+        self.RF.fit(train_x,train_y)
 
-        features : list[str]
-            List of feature names.
+        self.feature_imp = pd.Series(
+            self.RF.feature_importances_, index=train_x.columns).sort_values(ascending=False)
 
-        Returns:
-        ------------
+        return self.RF
+    
+    def predict(self, test_x, class_pred):
 
-        df : pd.Dataframe
-            Dataset containing hashed features.
+        test_x = self.prepare_data(test_x)
 
-        """        
-        
-        for feature, n_feat in features:
-            
-            FH = FeatureHasher(n_features=n_feat, input_type='string')
-
-            df[feature] = df[feature].apply(str)
-        
-            hashed_features = FH.fit_transform(df[feature])
-
-            hashed_features = pd.DataFrame(hashed_features.toarray())
-            hashed_features = hashed_features.add_prefix(feature + "_")
-
-            df = pd.concat([df.reset_index(drop=True), hashed_features], axis=1)
-        
-        df.to_csv("output/hashing.csv")
-
-        return df
-
-    def __init_RF(self, params, x_cols):
-        
-        if params is None:
-            forest = RandomForestClassifier(n_estimators=78, 
-                                            max_depth=8, 
-                                            min_samples_split=8,
-                                            min_samples_leaf=4, 
-                                            max_features=min(17, x_cols))
-        elif(params == "basic"):
-            forest = RandomForestClassifier(n_estimators=100)
+        if(class_pred):
+            pred_y = self.RF.predict(test_x)
         else:
-            forest = RandomForestClassifier(n_estimators=params["n_estimators"], 
-                                            max_depth=params["max_depth"], 
-                                            min_samples_split=params["min_samples_split"],
-                                            min_samples_leaf=params["min_samples_leaf"], 
-                                            max_features=min(params["max_features"], x_cols))
-        return forest
+            pred_y = self.RF.predict_proba(test_x)
 
+        return pred_y
 
-    def __ohe(self, data, OHE, i, cols):
+    def train_predict(self, train_x, train_y, test_x, class_pred):
         
-        #TODO: If time allows; include feature names correctly (X0_question -> prompttype_question) see doc for inu
-        dummy_data = np.array(data[cols])
-        if(i == 0):
-            dummy_data = OHE.fit_transform(dummy_data).toarray()
-        else:
-            dummy_data = OHE.transform(dummy_data).toarray()
-            
-        dummy_data = pd.DataFrame(dummy_data, columns=OHE.get_feature_names())
-        data = data.drop(cols, axis=1)
-        data = data.reset_index()
-        data = pd.concat([data, dummy_data], axis=1)
+        check = self.train(train_x, train_y)
 
-        return data
+        if check is None:
+            return None
 
-    def prepare_data(self, datasets, encoding):
+        pred_y = self.predict(test_x, class_pred)
 
-        """Function that prepares the data before it gets passed to 
-        the Random Forest model. It calculates the distance and floor
-        difference between user and prompt. Modifies the date feature and
-        encodes the categorical data in the encoder given by the user using 
-        encoding='ENCODER'.
+        return pred_y
 
-        Attributes:
-        ------------
+    def batch_system(self, data, class_pred, print_freq=1):
 
-        x_data : pd.Dataframe
-            Dataset of all the features.
-
-        encoding : str
-            Encoding technique for the categorical variables. Either 'label' for 
-            label encoding, 'ohe' for One Hot Encoding, 'hashing' for hashing, 'combi' 
-            for a combination of both hashing and OHE and none for removing the categorical
-            variables.
-
-        Returns:
-        ------------
-
-        x_data : pd.Dataframe
-            Dataset that is rightly configured for the model.
-        
-        """
-
-        cat_variables = ['prompt_type', 'device', 'user_id', 'prompt_description']
-        hash_features = [('user_id', 8), ("prompt_description", 3), 
-                        ("prompt_type", 1), ("device", 3)]
-        
-        
-        OHE = OneHotEncoder(handle_unknown='ignore')
-        out = []
-        for i, x_data in enumerate(datasets):
-
-            x_data = self.__calc_dist(x_data.copy())        
-            x_data = self.__calc_floor_dif(x_data.copy())   
-            x_data = self.__date_mod(x_data.copy()) 
-
-            if (encoding == 'label'):
-                x_data = self.__label_encoder(x_data, cat_variables)
-            
-            elif (encoding == 'ohe'):
-                
-                x_data = self.__ohe(x_data, OHE, i, cat_variables)
-
-            elif (encoding == 'hashing'):
-                x_data = self.__feature_hasher(x_data, hash_features)
-                x_data = x_data.drop(cat_variables, axis=1)
-            
-            elif (encoding == 'combi'):
-                x_data = self.__ohe(x_data, OHE, i, ['prompt_type', 'device', 'prompt_description'])
-                x_data = self.__feature_hasher(x_data, [('user_id', 10)])
-                x_data = x_data.drop(['user_id'], axis=1)
-            
-            else:
-                x_data = x_data.drop(cat_variables, axis=1)
-            
-            out.append(x_data)
-
-        if(len(datasets) == 1):
-            return (out[0])
-        else:
-            return (out[0], out[1])
-
-    # def init_encoding(self, encoding):
-
-    #         cat_variables = ['prompt_type', 'device', 'user_id', 'prompt_description']
-
-    #         if(encoding == 'ohe'):
-    #             OHE = OneHotEncoder(handle_unknown='ignore')
-
-    def test_model(self, data, hyper_params=None, feature_engineering=True, encoding='ohe', test_size=0.5):
-
-        y = data.pop('classification')
-
-        train_x, test_x, train_y, test_y = train_test_split(data, y, test_size=test_size)
-
-        pred_y = self.core_model(train_x, train_y, test_x, hyper_params=hyper_params,
-                                  feature_engineering=feature_engineering, encoding=encoding)
-        
-        accuracy = metrics.accuracy_score(test_y, pred_y) * 100
-
-        return accuracy
-
-    def batch_system(self, data, class_pred, encoding='ohe', hyper_params=None, feature_engineering=True, print_freq=1):
-        
         train_x = pd.DataFrame()
         train_y = pd.Series()
 
         test_res = {"accuracy":[], "size":[], "time":[]}
 
         for i, chunk in enumerate(data):
-            
+
             time = perf_counter()
 
             test_y = chunk.pop("classification")
@@ -320,14 +231,15 @@ class Batch:
                 weights = chunk.pop('total_weight')
                 chunk = chunk.drop(['user_weight', 'prompt_weight'], axis=1)
 
-            pred_y = self.core_model(train_x.copy(), train_y.copy(), chunk.copy(), hyper_params=hyper_params, 
-                                    feature_engineering=feature_engineering, encoding=encoding, class_pred=class_pred)
+            pred_y = self.train_predict(train_x.copy(), train_y.copy(), chunk.copy(), class_pred)
 
             train_x = train_x.append(chunk)
             train_y = train_y.append(test_y)
 
             time_measured = perf_counter() - time
 
+            # The first time no prediction is made due to not having data. 
+            # Therefore, no accuracy is measured.
             if(pred_y is None):
                 continue
             
@@ -343,35 +255,44 @@ class Batch:
 
             if(isinstance(print_freq, int) and i % print_freq == 0):
                 print("#", i, "(size:", len(test_y), ")",  "acc:", round(accuracy, 3), 
-                      "time:", round(time_measured, 3)) # "tot acc", round(tot_acc / tot_len, 3)
-
+                      "time:", round(time_measured, 3))
+        
         return test_res
 
+    def test_model(self, data, test_size=0.5, class_pred=True):
 
-    def core_model(self, train_x, train_y, test_x, hyper_params=None, 
-                    feature_engineering=True, encoding='ohe', class_pred=True):
-                
-        if(train_x.empty or train_y.empty):
-            return None
+        y = data.pop('classification')
 
-        if(feature_engineering):
-            train_x, test_x = self.prepare_data([train_x, test_x], encoding) 
+        train_x, test_x, train_y, test_y = train_test_split(data, y, test_size=test_size)
+
+        pred_y = self.train_predict(train_x, train_y, test_x, class_pred)
+        
+        if class_pred:
+            accuracy = metrics.accuracy_score(test_y, pred_y) * 100
         else:
-            train_x = train_x.drop(['date_time', 'prompt_type', 'prompt_description', 'device'], axis=1)
-            test_x = test_x.drop(['date_time', 'prompt_type', 'prompt_description', 'device'], axis=1)
+            pred_y = [item[1] for item in pred_y]
+            accuracy = metrics.mean_absolute_error(test_y, pred_y)
 
-        RF = self.__init_RF(hyper_params, len(train_x.columns))
+        return accuracy
+
+    def test_prediction(self, data, class_pred=True):
+
+        test_y = data.pop('classification')
+
+        pred_y = self.predict(data, class_pred)
         
-        RF.fit(train_x,train_y)
-        
-        if(class_pred):
-            pred_y = RF.predict(test_x)
-        else:    
-            pred_y = RF.predict_proba(test_x)
+        if class_pred:
+            accuracy = metrics.accuracy_score(test_y, pred_y) * 100
+        else:
+            pred_y = [item[1] for item in pred_y]
+            accuracy = metrics.mean_absolute_error(test_y, pred_y)
 
-        return pred_y
-        
+        return accuracy
 
+    def save_model(self, filename):
 
-        # hyper_params = {"n_estimators":78, "max_depth":8, "min_samples_split":8, 
-        #                 "min_samples_leaf":4, "max_features":min(17, max_cols)}
+        path = g.diropenbox()
+
+        with open(path+"/"+filename+".pickle", "wb") as output_file:
+            pickle.dump(self, output_file)
+
